@@ -133,7 +133,7 @@ fi
 # economy → Haiku (cheapest), standard → Sonnet (default), premium → Opus.
 PROFILE_FILE="$PROJECT_DIR/config/profile.yml"
 HAIKU_MODEL="claude-3-5-haiku-latest"
-HAIKU_GATE=false  # true when tier warrants a Haiku pre-screen pass
+HAIKU_GATE="false"  # true when tier warrants a Haiku pre-screen pass
 
 if [[ -z "$MODEL" && -f "$PROFILE_FILE" ]]; then
   raw_tier=$(grep -m1 '^spend_tier:' "$PROFILE_FILE" 2>/dev/null \
@@ -146,14 +146,18 @@ if [[ -z "$MODEL" && -f "$PROFILE_FILE" ]]; then
       ;;
     premium)
       MODEL="claude-opus-4"
-      HAIKU_GATE=true
+      HAIKU_GATE="true"
       ;;
     *)  # standard or unrecognized / missing
       MODEL="claude-sonnet-4-6"
-      HAIKU_GATE=true
+      HAIKU_GATE="true"
       ;;
   esac
-  echo "ℹ️  spend_tier=${raw_tier:-standard} → model=$MODEL${HAIKU_GATE:+ (Haiku pre-screen gate enabled)}"
+  gate_status=""
+  if [[ "$HAIKU_GATE" == "true" ]]; then
+    gate_status=" (Haiku pre-screen gate enabled)"
+  fi
+  echo "ℹ️  spend_tier=${raw_tier:-standard} → model=$MODEL$gate_status"
 fi
 
 
@@ -476,38 +480,48 @@ process_offer() {
   done
 
   # ── Haiku pre-screen gate (standard / premium tiers) ──────────────────────
-  # Run a cheap Haiku worker first. If the pre-screen score is < 3.0 the offer
-  # is unlikely to be a strong match; use the Haiku report as-is and skip the
-  # more expensive main-model evaluation. Only applies in batch mode (single
-  # interactive evaluations skip this — the user already decided it's worth it).
+  # Run a cheap Haiku worker first with the FULL evaluation prompt. If the
+  # pre-screen score is < 3.0 the offer is unlikely to be a strong match;
+  # keep the Haiku report/files and skip the more expensive main-model.
+  # If score is >= 3.0, delete the temporary Haiku report, PDF, and tracker TSV,
+  # and proceed to evaluate with the main model.
   local use_main_model=true
   if [[ "$HAIKU_GATE" == "true" && -n "$MODEL" && "$MODEL" != "$HAIKU_MODEL" ]]; then
-    local haiku_log="$LOGS_DIR/${report_num}-${id}-haiku-gate.log"
-    local haiku_prompt="Quick pre-screen (score only): evaluate this job offer and output a JSON object on the last line with format {\"score\": <number 1-5>}. URL: $url"
+    echo "    🔍 Haiku pre-screen gate (full evaluation) for #$id..."
     local -a haiku_args=(-p --dangerously-skip-permissions --strict-mcp-config --model "$HAIKU_MODEL")
-    haiku_args+=(--append-system-prompt-file "$resolved_prompt" "$haiku_prompt")
-    echo "    🔍 Haiku pre-screen gate for #$id..."
+    haiku_args+=(--append-system-prompt-file "$resolved_prompt" "$prompt")
     local haiku_exit=0
-    claude "${haiku_args[@]}" > "$haiku_log" 2>&1 || haiku_exit=$?
+    claude "${haiku_args[@]}" > "$log_file" 2>&1 || haiku_exit=$?
     if [[ $haiku_exit -eq 0 ]]; then
-      # Extract score from last line JSON: {"score": N.N}
+      # Extract score from JSON in log_file
       local gate_score
-      gate_score=$(tail -5 "$haiku_log" \
-        | grep -oE '"score"[[:space:]]*:[[:space:]]*[0-9]+(\.[0-9]+)?' \
-        | grep -oE '[0-9]+(\.[0-9]+)?' | tail -1 || true)
+      gate_score=$(sed -nE 's/.*"score":[[:space:]]*([0-9.]+).*/\1/p' "$log_file" 2>/dev/null | head -1 || true)
       if [[ -n "$gate_score" ]] && awk "BEGIN{exit !($gate_score < 3.0)}"; then
         echo "    ⚡ Pre-screen score $gate_score < 3.0 — using Haiku report, skipping $MODEL."
         # Promote haiku log as the main log; mark with economy-gate note
-        cp "$haiku_log" "$log_file"
         printf '\n\n[Haiku pre-screen gate: score=%s < 3.0; main model skipped]\n' "$gate_score" >> "$log_file"
         use_main_model=false
       else
-        echo "    ✅ Pre-screen score ${gate_score:-?} >= 3.0 — running $MODEL."
+        echo "    ✅ Pre-screen score ${gate_score:-?} >= 3.0 — deleting Haiku artifacts and running $MODEL."
+        # Extract report and pdf paths from the log file to clean them up
+        local haiku_report haiku_pdf
+        haiku_report=$(sed -nE 's/.*"report":[[:space:]]*"([^"]+)".*/\1/p' "$log_file" 2>/dev/null | head -1 || true)
+        haiku_pdf=$(sed -nE 's/.*"pdf":[[:space:]]*"([^"]+)".*/\1/p' "$log_file" 2>/dev/null | head -1 || true)
+        
+        # Clean up files created by Haiku so main model can regenerate them clean
+        rm -f "$PROJECT_DIR/batch/tracker-additions/${id}.tsv"
+        if [[ -n "$haiku_report" && "$haiku_report" != "null" ]]; then
+          rm -f "$PROJECT_DIR/$haiku_report"
+        fi
+        if [[ -n "$haiku_pdf" && "$haiku_pdf" != "null" ]]; then
+          rm -f "$PROJECT_DIR/$haiku_pdf"
+        fi
       fi
     else
       echo "    ⚠️  Haiku gate failed (exit $haiku_exit); proceeding with $MODEL."
+      # If the gate failed, delete any partial files and try again with the main model
+      rm -f "$PROJECT_DIR/batch/tracker-additions/${id}.tsv"
     fi
-    rm -f "$haiku_log"
   fi
 
   # Launch claude -p worker.
