@@ -3229,6 +3229,9 @@ console.log('\n13. Batch rate-limit pause');
 
 try {
   const tmp = mkdtempSync(join(tmpdir(), 'co-batch-rate-'));
+  const bashShell = process.platform === 'win32' && existsSync('C:\\Program Files\\Git\\bin\\bash.exe')
+    ? 'C:\\Program Files\\Git\\bin\\bash.exe'
+    : 'bash';
   const batchDir = join(tmp, 'batch');
   const fakeBin = join(tmp, 'bin');
   mkdirSync(batchDir, { recursive: true });
@@ -3236,12 +3239,8 @@ try {
   mkdirSync(join(tmp, 'data'), { recursive: true });
   mkdirSync(fakeBin, { recursive: true });
 
-  writeFileSync(join(batchDir, 'batch-runner.sh'), readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8').replace(/\r\n/g, '\n'));
-  if (process.platform === 'win32') {
-    try { execFileSync('bash', ['-c', 'chmod +x batch/batch-runner.sh'], { cwd: tmp }); } catch {}
-  } else {
-    execFileSync('chmod', ['+x', join(batchDir, 'batch-runner.sh')]);
-  }
+  writeFileSync(join(batchDir, 'batch-runner.sh'), readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8'));
+  if (process.platform !== 'win32') execFileSync('chmod', ['+x', join(batchDir, 'batch-runner.sh')]);
   writeFileSync(join(tmp, 'merge-tracker.mjs'), 'console.log("merge fixture");\n');
   writeFileSync(join(tmp, 'verify-pipeline.mjs'), 'console.log("verify fixture");\n');
   writeFileSync(join(batchDir, 'batch-prompt.md'), 'URL={{URL}}\nJD={{JD_FILE}}\nREPORT={{REPORT_NUM}}\n');
@@ -3256,14 +3255,10 @@ try {
     'echo "You\\x27ve hit your session limit · resets 12:30pm (Asia/Taipei)"',
     'exit 1',
   ].join('\n') + '\n');
-  if (process.platform === 'win32') {
-    try { execFileSync('bash', ['-c', 'chmod +x bin/claude'], { cwd: tmp }); } catch {}
-  } else {
-    execFileSync('chmod', ['+x', join(fakeBin, 'claude')]);
-  }
+  if (process.platform !== 'win32') execFileSync('chmod', ['+x', join(fakeBin, 'claude')]);
 
   const env = { ...process.env, PATH: `${fakeBin}${delimiter}${process.env.PATH}` };
-  const out = run('bash', [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1', '--max-retries', '3', '--rate-limit-sleep', '0'], {
+  const out = run(bashShell, [join(batchDir, 'batch-runner.sh'), '--parallel', '1', '--max-retries', '3', '--rate-limit-sleep', '0'], {
     cwd: tmp,
     env,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -3282,7 +3277,7 @@ try {
     '1\thttps://example.com/one\tpaused_rate_limit\t2026-01-01T00:00:00Z\t2026-01-01T00:00:01Z\t001\t-\tsession-limit; paused\t0',
     '2\thttps://example.com/two\tfailed\t2026-01-01T00:00:00Z\t2026-01-01T00:00:01Z\t002\t-\tworker-crash\t1',
   ].join('\n') + '\n');
-  const dry = run('bash', [toBashPath(join(batchDir, 'batch-runner.sh')), '--resume-paused', '--dry-run'], {
+  const dry = run(bashShell, [join(batchDir, 'batch-runner.sh'), '--resume-paused', '--dry-run'], {
     cwd: tmp,
     env,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -3302,7 +3297,7 @@ try {
     '2\thttps://example.com/two\tcompleted\t2026-01-01T00:00:00Z\t2026-01-01T00:00:01Z\t002\tbad);system("oops")\t-\t0',
     '3\thttps://example.com/three\tskipped\t2026-01-01T00:00:00Z\t2026-01-01T00:00:01Z\t003\t3.5\tbelow-min-score\t0',
   ].join('\n') + '\n');
-  const statusOnly = run('bash', [toBashPath(join(batchDir, 'batch-runner.sh')), '--status'], {
+  const statusOnly = run(bashShell, [join(batchDir, 'batch-runner.sh'), '--status'], {
     cwd: tmp,
     env,
     stdio: ['pipe', 'pipe', 'pipe'],
