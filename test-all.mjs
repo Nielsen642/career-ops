@@ -5260,6 +5260,67 @@ try {
   fail(`weworkremotely provider tests crashed: ${e.message}`);
 }
 
+
+// ── 30. GMAIL INGESTION HELPERS ──────────────────────────────────
+
+console.log('\n30. Gmail ingestion helpers');
+try {
+  const { extractUrls, isCleanUrl, isAuthenticEmail, parseRoleAtCompany } = await import(pathToFileURL(join(ROOT, 'gmail-helpers.mjs')).href);
+
+  // extractUrls
+  const sampleBody = 'Check this: https://boards.greenhouse.io/acme/jobs/123. Also tracking link: https://click.email.com/abc?q=1&amp;u=2';
+  const urls = extractUrls(sampleBody);
+  if (urls.length === 2 && urls[0] === 'https://boards.greenhouse.io/acme/jobs/123' && urls[1] === 'https://click.email.com/abc?q=1&u=2') {
+    pass('extractUrls extracts and cleans URLs from body');
+  } else {
+    fail(`extractUrls extracted wrong: ${JSON.stringify(urls)}`);
+  }
+
+  // isCleanUrl
+  if (isCleanUrl('https://boards.greenhouse.io/acme/jobs/123') === true &&
+      isCleanUrl('https://jobs.lever.co/acme/123') === true &&
+      isCleanUrl('https://click.email.com/abc') === false &&
+      isCleanUrl('https://sendgrid.com/track') === false &&
+      isCleanUrl('https://linkedin.com/settings/privacy') === false &&
+      isCleanUrl('https://example.com/careers/role') === true) {
+    pass('isCleanUrl correctly identifies job posting URLs vs tracking/settings links');
+  } else {
+    fail('isCleanUrl failed validation cases');
+  }
+
+  // isAuthenticEmail
+  const headersPass = [{ name: 'Authentication-Results', value: 'dkim=pass dmarc=pass' }];
+  const headersFail = [{ name: 'Authentication-Results', value: 'spf=pass dmarc=fail' }];
+  const headersMissing = [];
+  const headersNoPass = [{ name: 'Authentication-Results', value: 'spf=pass dmarc=none' }];
+  if (isAuthenticEmail(headersPass) === true &&
+      isAuthenticEmail(headersFail) === false &&
+      isAuthenticEmail(headersMissing) === false &&
+      isAuthenticEmail(headersNoPass) === false) {
+    pass('isAuthenticEmail is fail-closed, requiring dmarc=pass');
+  } else {
+    fail('isAuthenticEmail fail-closed check failed');
+  }
+
+  // parseRoleAtCompany
+  const sub1 = 'New match: Senior Staff AI Engineer at Cohere';
+  const sub2 = 'Job alert: Engineering Manager at Google - Job Details';
+  const sub3 = 'Fwd: Software Engineer at Stripe | Remote';
+  const parsed1 = parseRoleAtCompany(sub1);
+  const parsed2 = parseRoleAtCompany(sub2);
+  const parsed3 = parseRoleAtCompany(sub3);
+  if (parsed1?.role === 'Senior Staff AI Engineer' && parsed1?.company === 'Cohere' &&
+      parsed2?.role === 'Engineering Manager' && parsed2?.company === 'Google' &&
+      parsed3?.role === 'Software Engineer' && parsed3?.company === 'Stripe') {
+    pass('parseRoleAtCompany extracts role and company from typical subject lines');
+  } else {
+    fail(`parseRoleAtCompany failed: p1=${JSON.stringify(parsed1)}, p2=${JSON.stringify(parsed2)}, p3=${JSON.stringify(parsed3)}`);
+  }
+
+} catch (e) {
+  fail(`gmail helpers tests crashed: ${e.message}`);
+}
+
 // ── SUMMARY ─────────────────────────────────────────────────────
 
 console.log('\n' + '='.repeat(50));
