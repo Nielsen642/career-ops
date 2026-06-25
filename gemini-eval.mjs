@@ -120,11 +120,11 @@ if (existsSync(PATHS.profileYml)) {
 
 let defaultModel = process.env.GEMINI_MODEL;
 if (!defaultModel) {
-  if (spendTier === 'economy') {
-    defaultModel = 'gemini-2.5-flash';
-  } else {
-    // standard or premium (and any unknown/fallback tier)
+  if (spendTier === 'premium') {
     defaultModel = 'gemini-2.5-pro';
+  } else {
+    // economy or standard (and any unknown/fallback tier)
+    defaultModel = 'gemini-2.5-flash';
   }
 }
 let modelName = defaultModel;
