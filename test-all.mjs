@@ -4385,8 +4385,8 @@ try {
   fail(`ATS ligature suppression test crashed: ${e.message}`);
 }
 
-// ── 27. Provider — breezy ───────────────────────────────────────
-console.log('\n27. Provider — breezy');
+// ── 28. Provider — breezy ───────────────────────────────────────
+console.log('\n28. Provider — breezy');
 
 try {
   const breezy = (await import(pathToFileURL(join(ROOT, 'providers/breezy.mjs')).href)).default;
@@ -4488,6 +4488,96 @@ try {
 
 } catch (e) {
   fail(`breezy provider tests crashed: ${e.message}`);
+}
+
+// ── 29. PROVIDER LINKEDIN-APIFY ──────────────────────────────────
+
+console.log('\n29. Provider — linkedin-apify');
+try {
+  const linkedinApify = (await import(pathToFileURL(join(ROOT, 'providers/linkedin-apify.mjs')).href)).default;
+
+  if (linkedinApify.id === 'linkedin-apify') {
+    pass('linkedin-apify.id is "linkedin-apify"');
+  } else {
+    fail(`linkedin-apify.id is ${JSON.stringify(linkedinApify.id)}`);
+  }
+
+  // detect() always returns null
+  if (linkedinApify.detect({ name: 'X', careers_url: 'https://linkedin.com' }) === null) {
+    pass('linkedin-apify.detect() always returns null');
+  } else {
+    fail('linkedin-apify.detect() should return null');
+  }
+
+  // When APIFY_TOKEN is absent, returns [] silently
+  const origToken = process.env.APIFY_TOKEN;
+  delete process.env.APIFY_TOKEN;
+  let result;
+  try {
+    result = await linkedinApify.fetch({ name: 'Test' }, {});
+  } finally {
+    process.env.APIFY_TOKEN = origToken;
+  }
+  if (Array.isArray(result) && result.length === 0) {
+    pass('linkedin-apify.fetch() returns [] when APIFY_TOKEN is absent');
+  } else {
+    fail(`linkedin-apify.fetch() expected [] when token is absent but got: ${JSON.stringify(result)}`);
+  }
+
+  // When APIFY_TOKEN is present, fetches via ctx.fetchJson
+  process.env.APIFY_TOKEN = 'mock-token';
+  let calledUrl = '';
+  let calledOpts = null;
+  const mockCtx = {
+    fetchJson: async (url, opts) => {
+      calledUrl = url;
+      calledOpts = opts;
+      return [
+        { title: 'Job 1', companyName: 'Company A', location: 'Remote', jobUrl: 'https://linkedin.com/jobs/1' },
+        { jobTitle: 'Job 2', company: 'Company B', url: 'https://linkedin.com/jobs/2' },
+        { name: 'Invalid Job' } // no url -> dropped
+      ];
+    }
+  };
+
+  const fetched = await linkedinApify.fetch({
+    name: 'Company Target',
+    query: 'Staff Engineer',
+    location: 'Europe',
+    max_results: 15
+  }, mockCtx);
+
+  process.env.APIFY_TOKEN = origToken;
+
+  if (calledUrl === 'https://api.apify.com/v2/acts/bebity~linkedin-jobs-scraper/run-sync-get-dataset-items?token=mock-token') {
+    pass('linkedin-apify.fetch() uses correct API URL');
+  } else {
+    fail(`linkedin-apify.fetch() API URL wrong: ${calledUrl}`);
+  }
+
+  if (calledOpts && calledOpts.method === 'POST' && calledOpts.timeoutMs === 300000) {
+    pass('linkedin-apify.fetch() uses POST and sets high timeoutMs');
+  } else {
+    fail(`linkedin-apify.fetch() options wrong: ${JSON.stringify(calledOpts)}`);
+  }
+
+  const payload = JSON.parse(calledOpts?.body || '{}');
+  if (payload.searchQueries && payload.searchQueries[0] === 'Staff Engineer Europe' && payload.maxResults === 15) {
+    pass('linkedin-apify.fetch() passes correct input parameters');
+  } else {
+    fail(`linkedin-apify.fetch() request payload wrong: ${JSON.stringify(payload)}`);
+  }
+
+  if (fetched.length === 2 &&
+      fetched[0].title === 'Job 1' && fetched[0].company === 'Company A' &&
+      fetched[1].title === 'Job 2' && fetched[1].company === 'Company B') {
+    pass('linkedin-apify.fetch() normalizes and filters items correctly');
+  } else {
+    fail(`linkedin-apify.fetch() output wrong: ${JSON.stringify(fetched)}`);
+  }
+
+} catch (e) {
+  fail(`linkedin-apify provider tests crashed: ${e.message}`);
 }
 
 // ── SUMMARY ─────────────────────────────────────────────────────
