@@ -138,3 +138,12 @@ cover_letter:
 # half-point scores like 3.5/5 occur in evaluations). Set it to 0 to
 # generate a PDF for every offer.
 # auto_pdf_score_threshold: 4.0
+
+# ── Gmail Inbox Ingestion ───────────────────────────────────────────
+#
+# Configure labeled email ingestion into your pending pipeline.
+#
+# gmail_ingest:
+#   enabled: true
+#   label: "Job Leads"
+#   days_back: 7
