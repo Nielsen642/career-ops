@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.16.0](https://github.com/santifer/career-ops/compare/career-ops-v1.15.0...career-ops-v1.16.0) (2026-06-30)
+
+
+### Features
+
+* **providers:** add NoDesk provider ([#1330](https://github.com/santifer/career-ops/issues/1330)) ([7fca4dd](https://github.com/santifer/career-ops/commit/7fca4dd264d6ddbc58978cb079c25d63119bf744))
+
+
+### Bug Fixes
+
+* **cv-template:** keep role titles from orphaning at page breaks ([#1366](https://github.com/santifer/career-ops/issues/1366)) ([cbde5c4](https://github.com/santifer/career-ops/commit/cbde5c4d5c5e6a0c420ad550bfadcdaf78a1e6ca))
+* **dashboard:** map tracker columns by header name ([#1327](https://github.com/santifer/career-ops/issues/1327)) ([#1328](https://github.com/santifer/career-ops/issues/1328)) ([8257f69](https://github.com/santifer/career-ops/commit/8257f697ef0c0d5b9e0804344cb0275c80075059))
+* **pdf:** thread manifest metadata through render options ([#1367](https://github.com/santifer/career-ops/issues/1367)) ([c7e2439](https://github.com/santifer/career-ops/commit/c7e2439c1b7d2a031900404439dc2d27d93f1f88))
+
 ## [1.15.0](https://github.com/santifer/career-ops/compare/career-ops-v1.14.0...career-ops-v1.15.0) (2026-06-29)
 
 
