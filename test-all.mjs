@@ -273,7 +273,7 @@ try {
   // Liveness API rung (liveness-api.mjs) — the zero-token ATS first rung. We test the
   // pure URL→API resolution + SSRF guard; the network fetch is conservative by
   // construction (only 404/410→expired, 200→active, else null→Playwright fallback).
-  const { resolveAtsApi } = await import(pathToFileURL(join(ROOT, 'liveness-api.mjs')).href);
+  const { resolveAtsApi, classifyAshbyBoard, checkLivenessViaApi } = await import(pathToFileURL(join(ROOT, 'liveness-api.mjs')).href);
   const ghApi = resolveAtsApi('https://boards.greenhouse.io/acme/jobs/4567890');
   if (ghApi?.ats === 'greenhouse' && ghApi.apiUrl === 'https://boards-api.greenhouse.io/v1/boards/acme/jobs/4567890') {
     pass('resolveAtsApi maps a Greenhouse posting to its per-job API URL');
@@ -296,6 +296,79 @@ try {
     pass('resolveAtsApi rejects non-numeric Greenhouse ids and non-https (SSRF guard)');
   } else {
     fail('resolveAtsApi guard failed (bad id or http accepted)');
+  }
+  // Ashby: org-level board endpoint. Ashby pages are JS-rendered, so the browser/
+  // static rung sees only nav/footer and false-reports live postings as expired —
+  // the API rung must resolve the org board and confirm the specific job id.
+  const AS_UUID = '00fd8024-7804-4278-a38b-c9d60d929dbb';
+  const asApi = resolveAtsApi(`https://jobs.ashbyhq.com/deepgram/${AS_UUID}`);
+  if (asApi?.ats === 'ashby'
+      && asApi.apiUrl === 'https://api.ashbyhq.com/posting-api/job-board/deepgram'
+      && asApi.parts?.jobId === AS_UUID
+      && typeof asApi.interpret === 'function') {
+    pass('resolveAtsApi maps an Ashby posting to its org job-board API URL');
+  } else {
+    fail(`Ashby API URL wrong: ${JSON.stringify(asApi)}`);
+  }
+  // The /application apply-link variant must resolve to the same org + job id.
+  const asApply = resolveAtsApi(`https://jobs.ashbyhq.com/deepgram/${AS_UUID}/application`);
+  if (asApply?.ats === 'ashby' && asApply.parts?.org === 'deepgram' && asApply.parts?.jobId === AS_UUID) {
+    pass('resolveAtsApi handles the Ashby /application apply-link variant');
+  } else {
+    fail(`Ashby /application variant not resolved: ${JSON.stringify(asApply)}`);
+  }
+  // A bare board root (no job id) isn't a specific posting → null → Playwright.
+  if (resolveAtsApi('https://jobs.ashbyhq.com/deepgram') === null) {
+    pass('resolveAtsApi returns null for an Ashby board root (no job id)');
+  } else {
+    fail('resolveAtsApi should not treat an Ashby board root as a posting');
+  }
+  // classifyAshbyBoard — pure per-job liveness from the board payload.
+  const asListed = classifyAshbyBoard({ jobs: [{ id: AS_UUID, isListed: true }] }, AS_UUID);
+  const asAbsent = classifyAshbyBoard({ jobs: [{ id: 'other-id', isListed: true }] }, AS_UUID);
+  const asUnlisted = classifyAshbyBoard({ jobs: [{ id: AS_UUID, isListed: false }] }, AS_UUID);
+  const asBadShape = classifyAshbyBoard({ notJobs: [] }, AS_UUID);
+  if (asListed?.result === 'active'
+      && asAbsent?.result === 'expired'
+      && asUnlisted?.result === 'expired'
+      && asBadShape === null) {
+    pass('classifyAshbyBoard: listed→active, absent/unlisted→expired, bad shape→null');
+  } else {
+    fail(`classifyAshbyBoard wrong: listed=${JSON.stringify(asListed)} absent=${JSON.stringify(asAbsent)} unlisted=${JSON.stringify(asUnlisted)} badShape=${JSON.stringify(asBadShape)}`);
+  }
+  // checkLivenessViaApi — the fetch/Response orchestration around the pure helpers:
+  // a 200 with an org-level `interpret` (Ashby) is awaited and parsed, a per-job 200
+  // (Greenhouse) is live as-is, 404 is expired, and a rejected fetch (network error,
+  // or an aborted timeout — same code path) is inconclusive → null. Mock global.fetch
+  // so no network is hit; restore it in finally.
+  const origFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => ({ status: 200, json: async () => ({ jobs: [{ id: AS_UUID, isListed: true }] }) });
+    const cvAshbyLive = await checkLivenessViaApi(`https://jobs.ashbyhq.com/deepgram/${AS_UUID}`);
+    globalThis.fetch = async () => ({ status: 200, json: async () => ({ jobs: [] }) });
+    const cvAshbyGone = await checkLivenessViaApi(`https://jobs.ashbyhq.com/deepgram/${AS_UUID}`);
+    // 200 but a malformed board (no `jobs` array): interpret returns null, so the
+    // orchestration must fall through to null (→ Playwright), not a false verdict.
+    globalThis.fetch = async () => ({ status: 200, json: async () => ({}) });
+    const cvAshbyMalformed = await checkLivenessViaApi(`https://jobs.ashbyhq.com/deepgram/${AS_UUID}`);
+    globalThis.fetch = async () => ({ status: 200 });
+    const cvGhLive = await checkLivenessViaApi('https://boards.greenhouse.io/acme/jobs/4567890');
+    globalThis.fetch = async () => ({ status: 404 });
+    const cvGone = await checkLivenessViaApi('https://boards.greenhouse.io/acme/jobs/4567890');
+    globalThis.fetch = async () => { throw new Error('network down'); };
+    const cvErr = await checkLivenessViaApi('https://boards.greenhouse.io/acme/jobs/4567890');
+    if (cvAshbyLive?.result === 'active' && cvAshbyLive?.code === 'ashby_api_ok'
+        && cvAshbyGone?.result === 'expired' && cvAshbyGone?.code === 'ashby_api_unlisted'
+        && cvAshbyMalformed === null
+        && cvGhLive?.result === 'active'
+        && cvGone?.result === 'expired'
+        && cvErr === null) {
+      pass('checkLivenessViaApi: 200→interpret (Ashby), malformed→null, greenhouse 200→active, 404→expired, fetch error→null');
+    } else {
+      fail(`checkLivenessViaApi wrong: ashbyLive=${JSON.stringify(cvAshbyLive)} ashbyGone=${JSON.stringify(cvAshbyGone)} malformed=${JSON.stringify(cvAshbyMalformed)} ghLive=${JSON.stringify(cvGhLive)} gone=${JSON.stringify(cvGone)} err=${JSON.stringify(cvErr)}`);
+    }
+  } finally {
+    globalThis.fetch = origFetch;
   }
 
   // Headed-fallback-on-challenge path (liveness-browser.mjs). Fake Playwright
