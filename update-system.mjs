@@ -113,6 +113,7 @@ const SYSTEM_PATHS = [
   'liveness-api.mjs',
   'liveness-browser.mjs',
   'analyze-patterns.mjs',
+  'keyword-match.mjs',
   'detect-reposts.mjs',
   'followup-cadence.mjs',
   'gemini-eval.mjs',
